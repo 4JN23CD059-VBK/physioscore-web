@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AQA Exercise Performance Tracker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f9fb;
+        }
+        .score-card {
+            border-left: 6px solid;
+            padding: 1rem;
+            border-radius: 0.75rem;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        /* Custom dynamic classes for feedback styling */
+        .score-initializing { border-color: #3b82f6; background-color: #eff6ff; color: #1e40af; }
+        .score-excellent { border-color: #10b981; background-color: #ecfdf5; color: #065f46; }
+        .score-good { border-color: #fbbf24; background-color: #fffbeb; color: #92400e; }
+        .score-medium { border-color: #f97316; background-color: #fff7ed; color: #9a3412; }
+        .score-poor { border-color: #ef4444; background-color: #fef2f2; color: #b91c1c; }
+        
+        #video_display {
+            border-radius: 0.75rem;
+            box-shadow: 0 10px 15px rgba(0, 0, 0, 0.2);
+            width: 100%;
+            height: auto;
+            min-height: 250px; 
+            background-color: #000;
+        }
+    </style>
+</head>
+<body class="p-4 sm:p-8">
+
+    <header class="mb-8">
+        <h1 class="text-3xl font-bold text-gray-800">Exercise AQA Coach</h1>
+        <p class="text-gray-500">Real-time performance scoring using Depth-Aware 3DCNN.</p>
+    </header>
+
+    <main class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        <div class="lg:col-span-2">
+            <div id="video_container" class="relative rounded-xl overflow-hidden shadow-2xl bg-gray-900 aspect-video">
+                <img id="video_display" src="{{ url_for('video_feed') }}" alt="Live Camera Feed">
+                <div class="absolute top-0 left-0 w-full h-full flex items-center justify-center text-white text-xl font-medium" id="loading_overlay">
+                    <span class="animate-pulse">Waiting for camera stream...</span>
+                </div>
+            </div>
+            <p class="mt-2 text-sm text-gray-500">
+                Ensure your camera light is on. If the screen is black, try reloading or changing the `VIDEO_PATH` in `app.py`.
+            </p>
+        </div>
+
+        <div class="lg:col-span-1 space-y-6">
+            
+            <div id="feedback_card" class="score-card score-initializing">
+                <p class="text-sm font-semibold mb-1">CURRENT AQA SCORE</p>
+                <div class="flex items-end justify-between">
+                    <span id="score_value" class="text-5xl font-extrabold leading-none">...</span>
+                    <span class="text-xl font-bold text-gray-500">/ 100</span>
+                </div>
+                <p id="feedback_text" class="mt-3 text-base font-medium">Initializing...</p>
+            </div>
+
+            <div class="bg-white p-4 rounded-xl shadow-lg">
+                <p class="text-sm font-semibold text-gray-600 mb-2">Clip Collection Progress</p>
+                <div class="w-full bg-gray-200 rounded-full h-3">
+                    <div id="progress_bar" class="bg-blue-500 h-3 rounded-full transition-all duration-300" style="width: 0%"></div>
+                </div>
+                <p class="text-xs text-gray-500 mt-2">Collecting <span id="frame_count_status">0</span>/64 frames required for 3DCNN analysis.</p>
+            </div>
+        </div>
+
+    </main>
+    
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
