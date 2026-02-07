@@ -1,6 +1,24 @@
 /**
  * Script for fetching the AQA score and updating the UI dynamically.
  */
+
+/* script to start the user's camera: */
+const videoElement = document.getElementById('webcam_stream');
+
+async function startCamera() {
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
+        videoElement.srcObject = stream;
+        document.getElementById('loading_overlay').style.display = 'none';
+    } catch (err) {
+        console.error("Error accessing camera: ", err);
+        document.getElementById('overlay_text').textContent = "Camera Access Denied. Please enable permissions.";
+    }
+}
+
+// Call this when the page loads
+startCamera();
+
 document.addEventListener('DOMContentLoaded', () => {
     const scoreValue = document.getElementById('score_value');
     const feedbackText = document.getElementById('feedback_text');
@@ -80,4 +98,5 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initial fetch to populate the UI immediately
     fetchScore();
+
 });
