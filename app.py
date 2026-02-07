@@ -18,7 +18,7 @@ DEMO_CHECKPOINT_PATH = os.path.join(PROJECT_ROOT, 'Deeper3DCNN_Checkpoint_L1_REC
 
 # --- CONFIGURED RESOLUTION & CAMERA PATH ---
 # Using the path and resolution specified in your last request:
-VIDEO_PATH = 0 # Try 0, 1, 2, etc. if the camera doesn't open
+VIDEO_PATH = None # Try 0, 1, 2, etc. if the camera doesn't open
 TARGET_WIDTH = 1920  
 TARGET_HEIGHT = 1080 
 # -------------------------------------------
