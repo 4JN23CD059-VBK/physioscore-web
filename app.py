@@ -9,6 +9,12 @@ import threading
 import base64
 from torch.nn import BatchNorm3d, Conv3d, Linear, MaxPool3d, Module, Dropout, functional as F
 
+# Force PyTorch to use a single thread to save RAM
+torch.set_num_threads(1)
+
+# Disable the autograd engine (we are only doing inference)
+torch.set_grad_enabled(False)
+
 # --- CONFIGURATION ---
 PROJECT_ROOT = './'
 DEMO_CHECKPOINT_PATH = os.path.join(PROJECT_ROOT, 'model_weights_lite.pth')
