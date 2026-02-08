@@ -1,11 +1,11 @@
 from flask import Flask, render_template, Response, jsonify, request
+import gc
 import cv2
 import numpy as np
 import torch
 import os
 import time
 import threading 
-import gc
 import base64
 from torch.nn import BatchNorm3d, Conv3d, Linear, MaxPool3d, Module, Dropout, functional as F
 
@@ -168,42 +168,39 @@ def generate_corrective_feedback(predicted_score):
                 print(f"MiDaS/Depth Processing Error: {e}")
                 time.sleep(1) 
                 continue"""
+        
 def process_frames_for_aqa():
-    """Manages raw frame processing, depth map creation, and 3DCNN inference."""
+    """Manages raw frame processing and 3DCNN inference (Optimized for Render)."""
     global RAW_FRAME_BUFFER, PROCESSED_FRAME_BUFFER, LATEST_AQA_DATA
     
     while not THREAD_STOP_EVENT.is_set():
-        # 1. Acquire ONE raw frame for MiDaS processing
         raw_frame = None
         with RAW_BUFFER_LOCK:
             if RAW_FRAME_BUFFER:
                 raw_frame = RAW_FRAME_BUFFER.pop(0) 
 
         if raw_frame is not None:
-            # 2. RUN THE HEAVY MiDaS and Pre-Processing 
             try:
-                depth_map = run_midas(raw_frame)
-                masked_depth_image = apply_depth_mask(depth_map)
-                # Fixed the typo here: changed normalization -> normalize
-                processed_frame = resize_and_normalize(masked_depth_image)
-
-                # CLEAN RAM IMMEDIATELY after MiDaS
-                del depth_map
-                gc.collect()
+                # Optimized Path: Skip MiDaS to stay under 512MB RAM
+                gray = cv2.cvtColor(raw_frame, cv2.COLOR_BGR2GRAY)
+                processed_frame = cv2.resize(gray, TARGET_SIZE, interpolation=cv2.INTER_LINEAR)
+                processed_frame = processed_frame.astype(np.float32) / 255.0
 
                 with PROCESSED_BUFFER_LOCK:
                     PROCESSED_FRAME_BUFFER.append(processed_frame)
+                
+                # Immediate memory cleanup
+                del gray
+                gc.collect()
             except Exception as e:
-                print(f"Internal Processing Error: {e}")
+                print(f"Processing Error: {e}")
            
-        # 3. INFERENCE LOGIC (Sliding Window)
         with PROCESSED_BUFFER_LOCK:
             if len(PROCESSED_FRAME_BUFFER) >= FRAME_COUNT:
                 clip_data = np.stack(PROCESSED_FRAME_BUFFER[:FRAME_COUNT], axis=0)
-                # Keep the last 32 frames for continuity (Research Reference B)
                 PROCESSED_FRAME_BUFFER = PROCESSED_FRAME_BUFFER[32:]
                 
-                # Perform 3DCNN Inference
+                # Inference
                 X = torch.from_numpy(clip_data).unsqueeze(0).unsqueeze(0).float().to(device)
                 with torch.no_grad():
                     predicted_output = model(X)
@@ -217,12 +214,10 @@ def process_frames_for_aqa():
                         "progress": 100
                     })
                 
-                # FINAL RAM CLEANUP
                 del X
                 gc.collect()
 
         time.sleep(0.01)
-
 # NEW ROUTE: This is how the browser sends the webcam data to the server
 @app.route('/process_webcam', methods=['POST'])
 def process_webcam():
@@ -236,8 +231,6 @@ def process_webcam():
             RAW_FRAME_BUFFER.append(frame)
             
     return jsonify({"status": "received"})
-
-
 # -------------------------------------------------------------------------
 # --- FLASK APPLICATION & VIDEO GENERATOR (Fast Stream) ---
 # -------------------------------------------------------------------------
