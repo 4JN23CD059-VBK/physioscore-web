@@ -10,74 +10,59 @@ document.addEventListener('DOMContentLoaded', () => {
     const videoDisplay = document.getElementById('video_display');
     const loadingOverlay = document.getElementById('loading_overlay');
 
-    let isVideoLoaded = false;
-    
-    // Function to fetch the score from the backend
+    // --- NEW: WEBCAM TRANSMITTER LOGIC ---
+    const hiddenCanvas = document.createElement('canvas');
+    const ctx = hiddenCanvas.getContext('2d');
+    hiddenCanvas.width = 640;  // Standard for MiDaS
+    hiddenCanvas.height = 480;
+
+    // 1. Get User Media (Open the webcam in the browser)
+    navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } })
+        .then(stream => {
+            videoDisplay.srcObject = stream;
+            videoDisplay.play();
+            loadingOverlay.style.display = 'none';
+            
+            // 2. Start sending frames to the server every 150ms (~7 FPS)
+            // We use 150ms to avoid overwhelming the Render Free Tier RAM
+            setInterval(sendFrameToServer, 150);
+        })
+        .catch(err => {
+            console.error("Webcam Error: ", err);
+            loadingOverlay.textContent = "Please allow camera access for the Research Demo.";
+        });
+
+    function sendFrameToServer() {
+        // Draw the current video frame to our hidden canvas
+        ctx.drawImage(videoDisplay, 0, 0, hiddenCanvas.width, hiddenCanvas.height);
+        
+        // Convert to Base64 JPEG (Quality 0.5 to save bandwidth)
+        const dataUrl = hiddenCanvas.toDataURL('image/jpeg', 0.5);
+
+        fetch('/process_webcam', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image: dataUrl })
+        }).catch(err => console.log("Upload failed. Server likely rebooting..."));
+    }
+
+    // --- EXISTING: SCORE FETCHING LOGIC ---
     function fetchScore() {
         fetch('/score_feed')
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error('Network response was not ok');
-                }
-                return response.json();
-            })
+            .then(response => response.json())
             .then(data => {
-                // Update Score and Feedback
                 scoreValue.textContent = data.score;
                 feedbackText.textContent = data.feedback_text;
-
-                // Update Card Styling based on feedback_class (e.g., score-excellent)
-                // Note: Assumes feedback_class aligns with the CSS classes defined in the HTML <style> block
                 feedbackCard.className = `score-card ${data.feedback_class}`;
-
-                // Update Progress Bar
+                
                 const progress = data.progress;
                 progressBar.style.width = `${progress}%`;
                 
-                // Change progress bar color based on status (better visual cue)
-                progressBar.classList.remove('bg-blue-500', 'bg-green-500', 'bg-red-500');
-                if (data.feedback_class === 'score-initializing') {
-                    progressBar.classList.add('bg-blue-500');
-                } else if (data.feedback_class === 'score-excellent' || data.feedback_class === 'score-good') {
-                    progressBar.classList.add('bg-green-500');
-                } else {
-                    progressBar.classList.add('bg-red-500');
-                }
-                
-                // Estimate current frame count based on progress
                 const FRAME_COUNT_MAX = 64; 
                 const currentFrames = Math.min(FRAME_COUNT_MAX, Math.floor(FRAME_COUNT_MAX * (progress / 100)));
                 frameCountStatus.textContent = currentFrames;
-
-            })
-            .catch(error => {
-                console.error('Error fetching score feed:', error);
-                feedbackText.textContent = "Connection lost. Restarting server...";
-                feedbackCard.className = 'score-card score-poor';
-                scoreValue.textContent = "ERR";
             });
     }
 
-    // Check if the video stream has started loading
-    videoDisplay.onload = () => {
-        if (!isVideoLoaded) {
-            console.log("Video stream started successfully.");
-            loadingOverlay.style.display = 'none';
-            isVideoLoaded = true;
-        }
-    };
-    
-    // Fallback for camera not starting quickly (keep overlay visible)
-    setTimeout(() => {
-        if (!isVideoLoaded) {
-            loadingOverlay.textContent = "Camera not responding. Check app.py VIDEO_PATH.";
-        }
-    }, 5000);
-
-
-    // Poll the score feed every 500ms (twice a second)
     setInterval(fetchScore, 500);
-
-    // Initial fetch to populate the UI immediately
-    fetchScore();
 });
