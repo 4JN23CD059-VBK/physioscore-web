@@ -106,9 +106,9 @@ def run_midas(frame: np.ndarray) -> np.ndarray:
 
 def apply_depth_mask(depth_map: np.ndarray) -> np.ndarray:
     return depth_map # Just pass it through
-"""
-def run_midas(frame: np.ndarray) -> np.ndarray:
-    """Runs MiDaS on a single frame."""
+
+""" def run_midas(frame: np.ndarray) -> np.ndarray:
+   # Runs MiDaS on a single frame.
     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     with torch.no_grad():
         input_batch = transform(frame_rgb).to(device)
@@ -123,12 +123,12 @@ def run_midas(frame: np.ndarray) -> np.ndarray:
     return np.clip(depth_map, 0.0, None)
 
 def apply_depth_mask(depth_map: np.ndarray) -> np.ndarray:
-    """Applies a simple foreground-based depth mask."""
+   #  Applies a simple foreground-based depth mask.
     depth_threshold = np.percentile(depth_map, 5) * DEPTH_MASK_MULTIPLIER
     mask = (depth_map < depth_threshold).astype(np.uint8) * 255
     masked_depth_image = cv2.bitwise_and(depth_map, depth_map, mask=mask)
-    return masked_depth_image
-"""
+    return masked_depth_image """
+
 
 def resize_and_normalize(masked_depth_image: np.ndarray) -> np.ndarray:
     """Applies final resize and normalize (0-1 scaling)."""
