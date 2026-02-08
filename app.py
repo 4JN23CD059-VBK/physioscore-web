@@ -52,10 +52,6 @@ class Deeper3DCNN(Module):
         x = x.flatten(start_dim=1); x = F.relu(self.fc1(x)); x = self.dropout(x); x = self.fc_out(x)
         return x
 
-model = Deeper3DCNN(num_output_classes=1).to(device)
-if os.path.exists(DEMO_CHECKPOINT_PATH):
-    model.load_state_dict(torch.load(DEMO_CHECKPOINT_PATH, map_location=device))
-    model.eval()
 
 # --- UTILITIES ---
 def generate_feedback(score):
