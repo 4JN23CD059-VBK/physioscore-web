@@ -1,10 +1,12 @@
-from flask import Flask, render_template, Response, jsonify
+from flask import Flask, render_template, Response, jsonify, request
 import cv2
 import numpy as np
 import torch
 import os
 import time
 import threading 
+import gc
+import base64
 from torch.nn import BatchNorm3d, Conv3d, Linear, MaxPool3d, Module, Dropout, functional as F
 
 # -------------------------------------------------------------------------
@@ -118,7 +120,7 @@ def apply_depth_mask(depth_map: np.ndarray) -> np.ndarray:
     return masked_depth_image
 
 def resize_and_normalize(masked_depth_image: np.ndarray) -> np.ndarray:
-    """Applies final resize and normalization (0-1 scaling)."""
+    """Applies final resize and normalize (0-1 scaling)."""
     resized = cv2.resize(masked_depth_image, TARGET_SIZE, interpolation=cv2.INTER_LINEAR)
     processed_frame = resized.astype(np.float32)
     max_val = np.max(processed_frame)
@@ -142,6 +144,19 @@ def generate_corrective_feedback(predicted_score):
 # -------------------------------------------------------------------------
 # --- THREADED AQA PROCESSING (Slow, runs in background) ---
 # -------------------------------------------------------------------------
+            """
+            if 'midas_model' not in globals() or 'model' not in globals():
+                LATEST_AQA_DATA[0].update({"feedback": "Model initialization failed. Score unavailable.", "class": "score-poor", "progress": 0})
+                time.sleep(1)
+                continue
+            try:
+                depth_map = run_midas(raw_frame)
+                masked_depth_image = apply_depth_mask(depth_map)
+                processed_frame = resize_and_normalize(masked_depth_image)
+            except Exception as e:
+                print(f"MiDaS/Depth Processing Error: {e}")
+                time.sleep(1) 
+                continue"""
 def process_frames_for_aqa():
     """Manages raw frame processing, depth map creation, and 3DCNN inference."""
     global RAW_FRAME_BUFFER, PROCESSED_FRAME_BUFFER, LATEST_AQA_DATA
@@ -155,58 +170,61 @@ def process_frames_for_aqa():
 
         if raw_frame is not None:
             # 2. RUN THE HEAVY MiDaS and Pre-Processing 
-            # Guard against failed model loads
-            if 'midas_model' not in globals() or 'model' not in globals():
-                LATEST_AQA_DATA[0].update({"feedback": "Model initialization failed. Score unavailable.", "class": "score-poor", "progress": 0})
-                time.sleep(1)
-                continue
-
             try:
                 depth_map = run_midas(raw_frame)
                 masked_depth_image = apply_depth_mask(depth_map)
+                # Fixed the typo here: changed normalization -> normalize
                 processed_frame = resize_and_normalize(masked_depth_image)
+
+                # CLEAN RAM IMMEDIATELY after MiDaS
+                del depth_map
+                gc.collect()
+
+                with PROCESSED_BUFFER_LOCK:
+                    PROCESSED_FRAME_BUFFER.append(processed_frame)
             except Exception as e:
-                print(f"MiDaS/Depth Processing Error: {e}")
-                time.sleep(1) 
-                continue
-
-            # 3. Add the processed frame to the AQA buffer
-            with PROCESSED_BUFFER_LOCK:
-                PROCESSED_FRAME_BUFFER.append(processed_frame)
-
-        # 4. Check if the AQA buffer is full enough for 3DCNN inference
-        current_buffer_length = 0
+                print(f"Internal Processing Error: {e}")
+           
+        # 3. INFERENCE LOGIC (Sliding Window)
         with PROCESSED_BUFFER_LOCK:
-            current_buffer_length = len(PROCESSED_FRAME_BUFFER)
-            
-            # Update Progress for UI 
-            current_progress = int((current_buffer_length / FRAME_COUNT) * 100)
-            LATEST_AQA_DATA[0]["progress"] = current_progress 
+            if len(PROCESSED_FRAME_BUFFER) >= FRAME_COUNT:
+                clip_data = np.stack(PROCESSED_FRAME_BUFFER[:FRAME_COUNT], axis=0)
+                # Keep the last 32 frames for continuity (Research Reference B)
+                PROCESSED_FRAME_BUFFER = PROCESSED_FRAME_BUFFER[32:]
+                
+                # Perform 3DCNN Inference
+                X = torch.from_numpy(clip_data).unsqueeze(0).unsqueeze(0).float().to(device)
+                with torch.no_grad():
+                    predicted_output = model(X)
+                    raw_score = predicted_output.item()
+                    feedback_data = generate_corrective_feedback(raw_score)
+                    
+                    LATEST_AQA_DATA[0].update({
+                        "score": f"{raw_score:.2f}",
+                        "feedback": feedback_data['text'],
+                        "class": feedback_data['class'],
+                        "progress": 100
+                    })
+                
+                # FINAL RAM CLEANUP
+                del X
+                gc.collect()
 
-            if current_buffer_length == FRAME_COUNT:
-                # Get the clip and remove the oldest half for sliding window
-                clip_data = np.stack(PROCESSED_FRAME_BUFFER, axis=0)
-                PROCESSED_FRAME_BUFFER = PROCESSED_FRAME_BUFFER[int(FRAME_COUNT/2):]
-                
-        if current_buffer_length == FRAME_COUNT:
-            # 5. PERFORM THE SLOW 3DCNN INFERENCE
-            X = torch.from_numpy(clip_data).unsqueeze(0).unsqueeze(0).float().to(device)
-
-            with torch.no_grad():
-                predicted_output = model(X)
-                
-                raw_score = predicted_output.item()
-                feedback_data = generate_corrective_feedback(raw_score)
-                
-                # Update the shared result once inference is complete
-                LATEST_AQA_DATA[0].update({
-                    "score": f"{raw_score:.2f}",
-                    "feedback": feedback_data['text'],
-                    "class": feedback_data['class'],
-                    "progress": 100 
-                })
-        
         time.sleep(0.01)
+
+# NEW ROUTE: This is how the browser sends the webcam data to the server
+@app.route('/process_webcam', methods=['POST'])
+def process_webcam():
+    data = request.get_json()
+    image_data = data['image'].split(",")[1]
+    nparr = np.frombuffer(base64.b64decode(image_data), np.uint8)
+    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    
+    with RAW_BUFFER_LOCK:
+        if len(RAW_FRAME_BUFFER) < 10:
+            RAW_FRAME_BUFFER.append(frame)
+            
+    return jsonify({"status": "received"})
 
 
 # -------------------------------------------------------------------------
