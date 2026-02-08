@@ -65,6 +65,19 @@ def generate_feedback(score):
         return {"text": f"GOOD: {score:.1f}/100. Keep it up!", "class": "score-good"}
     return {"text": f"ADJUST: {score:.1f}/100. Focus on form.", "class": "score-poor"}
 
+model = None
+def get_model():
+    global model
+    if model is None:
+        print("📥 Lazy loading model into RAM...")
+        model = Deeper3DCNN(num_output_classes=1).to(device)
+        if os.path.exists(DEMO_CHECKPOINT_PATH):
+            model.load_state_dict(torch.load(DEMO_CHECKPOINT_PATH, map_location=device))
+        model.eval()
+        # Crucial: Clear RAM after loading
+        gc.collect()
+    return model
+
 def process_frames_for_aqa():
     global RAW_FRAME_BUFFER, PROCESSED_FRAME_BUFFER, LATEST_AQA_DATA
     while not THREAD_STOP_EVENT.is_set():
@@ -87,8 +100,9 @@ def process_frames_for_aqa():
                 clip = np.stack(PROCESSED_FRAME_BUFFER[:FRAME_COUNT], axis=0)
                 PROCESSED_FRAME_BUFFER = PROCESSED_FRAME_BUFFER[32:] # Sliding Window
                 X = torch.from_numpy(clip).unsqueeze(0).unsqueeze(0).to(device)
+                aqa_model = get_model() # This only loads the model once, when needed
                 with torch.no_grad():
-                    out = model(X)
+                    out = aqa_model(X)
                     score = out.item()
                     fb = generate_feedback(score)
                     LATEST_AQA_DATA[0].update({"score": f"{score:.1f}", "feedback": fb['text'], "class": fb['class'], "progress": 100})
