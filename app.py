@@ -1,36 +1,24 @@
-from flask import Flask, render_template, Response, jsonify, request
-import gc
-import cv2
+from flask import Flask, render_template, jsonify, request
+import gc, cv2, torch, os, time, threading, base64
 import numpy as np
-import torch
-import os
-import time
-import threading 
-import base64
 from torch.nn import BatchNorm3d, Conv3d, Linear, MaxPool3d, Module, Dropout, functional as F
 
-# Force PyTorch to use a single thread to save RAM
+# --- CRITICAL MEMORY CONTROLS ---
 torch.set_num_threads(1)
-
-# Disable the autograd engine (we are only doing inference)
 torch.set_grad_enabled(False)
 
-# --- CONFIGURATION ---
+app = Flask(__name__)
 PROJECT_ROOT = './'
 DEMO_CHECKPOINT_PATH = os.path.join(PROJECT_ROOT, 'model_weights_lite.pth')
 FRAME_COUNT = 64
 TARGET_SIZE = (115, 115)
 
 # --- SHARED STATE ---
-RAW_FRAME_BUFFER = []      
-PROCESSED_FRAME_BUFFER = [] 
-THREAD_STOP_EVENT = threading.Event() 
-RAW_BUFFER_LOCK = threading.Lock() 
+RAW_FRAME_BUFFER = []
+PROCESSED_FRAME_BUFFER = []
+RAW_BUFFER_LOCK = threading.Lock()
 PROCESSED_BUFFER_LOCK = threading.Lock()
-LATEST_AQA_DATA = [{"score": "...", "feedback": "Initializing...", "class": "score-initializing", "progress": 0}] 
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-app = Flask(__name__)
+LATEST_AQA_DATA = [{"score": "...", "feedback": "Initializing...", "class": "score-initializing", "progress": 0}]
 
 # --- MODEL DEFINITION ---
 class Deeper3DCNN(Module):
@@ -43,8 +31,7 @@ class Deeper3DCNN(Module):
         self.conv4 = Conv3d(128, 256, (3, 3, 3), padding=1); self.bn4 = BatchNorm3d(256)
         self.pool2 = MaxPool3d(kernel_size=(2, 2, 2), stride=(2, 2, 2))
         self.fc1 = Linear(401408, 512)
-        self.dropout = Dropout(p=0.5)
-        self.fc_out = Linear(512, num_output_classes)
+        self.dropout = Dropout(p=0.5); self.fc_out = Linear(512, num_output_classes)
 
     def forward(self, x):
         x = F.relu(self.bn1(self.conv1(x))); x = F.relu(self.bn2(self.conv2(x))); x = self.pool1(x)
@@ -52,63 +39,56 @@ class Deeper3DCNN(Module):
         x = x.flatten(start_dim=1); x = F.relu(self.fc1(x)); x = self.dropout(x); x = self.fc_out(x)
         return x
 
+# Global model pointer
+global_model = None
 
-# --- UTILITIES ---
-def generate_feedback(score):
-    if score >= 85.0:
-        return {"text": f"EXCELLENT: {score:.1f}/100. Great technique!", "class": "score-excellent"}
-    elif score >= 70.0:
-        return {"text": f"GOOD: {score:.1f}/100. Keep it up!", "class": "score-good"}
-    return {"text": f"ADJUST: {score:.1f}/100. Focus on form.", "class": "score-poor"}
-
-model = None
 def get_model():
-    global model
-    if model is None:
-        print("📥 Lazy loading model into RAM...")
-        model = Deeper3DCNN(num_output_classes=1).to(device)
+    global global_model
+    if global_model is None:
+        device = torch.device("cpu")
+        global_model = Deeper3DCNN(num_output_classes=1).to(device)
         if os.path.exists(DEMO_CHECKPOINT_PATH):
-            model.load_state_dict(torch.load(DEMO_CHECKPOINT_PATH, map_location=device))
-        model.eval()
-        # Crucial: Clear RAM after loading
+            global_model.load_state_dict(torch.load(DEMO_CHECKPOINT_PATH, map_location=device))
+        global_model.eval()
         gc.collect()
-    return model
+    return global_model
 
 def process_frames_for_aqa():
-    global RAW_FRAME_BUFFER, PROCESSED_FRAME_BUFFER, LATEST_AQA_DATA
-    while not THREAD_STOP_EVENT.is_set():
+    global PROCESSED_FRAME_BUFFER, LATEST_AQA_DATA
+    while True:
         raw_frame = None
         with RAW_BUFFER_LOCK:
             if RAW_FRAME_BUFFER:
                 raw_frame = RAW_FRAME_BUFFER.pop(0)
 
         if raw_frame is not None:
-            # Pre-processing (Lean Mode)
             gray = cv2.cvtColor(raw_frame, cv2.COLOR_BGR2GRAY)
             resized = cv2.resize(gray, TARGET_SIZE)
             processed = resized.astype(np.float32) / 255.0
             with PROCESSED_BUFFER_LOCK:
                 PROCESSED_FRAME_BUFFER.append(processed)
+            del raw_frame, gray, resized
             gc.collect()
 
         with PROCESSED_BUFFER_LOCK:
             if len(PROCESSED_FRAME_BUFFER) >= FRAME_COUNT:
                 clip = np.stack(PROCESSED_FRAME_BUFFER[:FRAME_COUNT], axis=0)
-                PROCESSED_FRAME_BUFFER = PROCESSED_FRAME_BUFFER[32:] # Sliding Window
-                X = torch.from_numpy(clip).unsqueeze(0).unsqueeze(0).to(device)
-                aqa_model = get_model() # This only loads the model once, when needed
+                PROCESSED_FRAME_BUFFER = PROCESSED_FRAME_BUFFER[32:] 
+                X = torch.from_numpy(clip).unsqueeze(0).unsqueeze(0)
+                
+                model = get_model()
                 with torch.no_grad():
-                    out = aqa_model(X)
-                    score = out.item()
-                    fb = generate_feedback(score)
-                    LATEST_AQA_DATA[0].update({"score": f"{score:.1f}", "feedback": fb['text'], "class": fb['class'], "progress": 100})
+                    score = model(X).item()
+                    # Mapping feedback
+                    fb = "EXCELLENT" if score >= 85 else "GOOD" if score >= 70 else "ADJUST FORM"
+                    cl = "score-excellent" if score >= 85 else "score-good" if score >= 70 else "score-poor"
+                    LATEST_AQA_DATA[0].update({"score": f"{score:.1f}", "feedback": fb, "class": cl, "progress": 100})
+                del X, clip
                 gc.collect()
-        time.sleep(0.01)
+        time.sleep(0.05)
 
-# --- ROUTES ---
 @app.route('/')
-def index():
-    return render_template('index.html')
+def index(): return render_template('index.html')
 
 @app.route('/process_webcam', methods=['POST'])
 def process_webcam():
@@ -117,26 +97,14 @@ def process_webcam():
     nparr = np.frombuffer(base64.b64decode(image_data), np.uint8)
     frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     with RAW_BUFFER_LOCK:
-        if len(RAW_FRAME_BUFFER) < 10:
-            RAW_FRAME_BUFFER.append(frame)
+        if len(RAW_FRAME_BUFFER) < 10: RAW_FRAME_BUFFER.append(frame)
     return jsonify({"status": "ok"})
 
 @app.route('/score_feed')
 def score_feed():
-    data = LATEST_AQA_DATA[0]
-    return jsonify({
-        'score': data['score'], 'feedback_text': data['feedback'],
-        'feedback_class': data['class'], 'progress': data['progress']
-    })
+    return jsonify(LATEST_AQA_DATA[0])
 
 if __name__ == '__main__':
-    # 1. Start your AQA background thread
-    aqa_thread = threading.Thread(target=process_frames_for_aqa)
-    aqa_thread.daemon = True 
-    aqa_thread.start()
-    
-    # 2. Grab the port Render provides, or default to 10000
+    threading.Thread(target=process_frames_for_aqa, daemon=True).start()
     port = int(os.environ.get("PORT", 10000))
-    
-    # 3. Run the app on 0.0.0.0
     app.run(host='0.0.0.0', port=port)
