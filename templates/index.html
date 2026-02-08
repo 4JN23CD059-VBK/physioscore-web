@@ -47,8 +47,9 @@
         
         <div class="lg:col-span-2">
             <div id="video_container" class="relative rounded-xl overflow-hidden shadow-2xl bg-gray-900 aspect-video">
-                <img id="video_display" src="{{ url_for('video_feed') }}" alt="Live Camera Feed">
-                <div class="absolute top-0 left-0 w-full h-full flex items-center justify-center text-white text-xl font-medium" id="loading_overlay">
+                 <video id="video_display" autoplay playsinline muted class="w-full h-full object-cover"></video> 
+                
+                 <div class="absolute top-0 left-0 w-full h-full flex items-center justify-center text-white text-xl font-medium" id="loading_overlay">
                     <span class="animate-pulse">Waiting for camera stream...</span>
                 </div>
             </div>
