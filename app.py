@@ -10,7 +10,7 @@ torch.set_grad_enabled(False)
 app = Flask(__name__)
 PROJECT_ROOT = './'
 DEMO_CHECKPOINT_PATH = os.path.join(PROJECT_ROOT, 'model_weights_lite.pth')
-FRAME_COUNT = 64
+FRAME_COUNT = 32
 TARGET_SIZE = (115, 115)
 
 # --- SHARED STATE ---
@@ -54,7 +54,8 @@ def get_model():
     return global_model
 
 def process_frames_for_aqa():
-    global PROCESSED_FRAME_BUFFER, LATEST_AQA_DATA
+    global RAW_FRAME_BUFFER, PROCESSED_FRAME_BUFFER, LATEST_AQA_DATA
+    print("🚀 AQA Background Thread Started")
     while True:
         raw_frame = None
         with RAW_BUFFER_LOCK:
@@ -67,26 +68,29 @@ def process_frames_for_aqa():
             processed = resized.astype(np.float32) / 255.0
             with PROCESSED_BUFFER_LOCK:
                 PROCESSED_FRAME_BUFFER.append(processed)
-            del raw_frame, gray, resized
+                # PULSE LOG: See the progress in Render Logs
+                if len(PROCESSED_FRAME_BUFFER) % 10 == 0:
+                    print(f"📊 Buffer Progress: {len(PROCESSED_FRAME_BUFFER)}/32")
             gc.collect()
 
         with PROCESSED_BUFFER_LOCK:
-            if len(PROCESSED_FRAME_BUFFER) >= FRAME_COUNT:
-                clip = np.stack(PROCESSED_FRAME_BUFFER[:FRAME_COUNT], axis=0)
-                PROCESSED_FRAME_BUFFER = PROCESSED_FRAME_BUFFER[32:] 
+            # TRIGGER FASTER: Now only needs 32 frames
+            if len(PROCESSED_FRAME_BUFFER) >= 32: 
+                print("🧠 Buffer Full! Triggering 3DCNN Inference...")
+                clip = np.stack(PROCESSED_FRAME_BUFFER[:32], axis=0)
+                PROCESSED_FRAME_BUFFER = PROCESSED_FRAME_BUFFER[16:] # Keep 16 for smoothness
                 X = torch.from_numpy(clip).unsqueeze(0).unsqueeze(0)
                 
                 model = get_model()
                 with torch.no_grad():
                     score = model(X).item()
-                    # Mapping feedback
                     fb = "EXCELLENT" if score >= 85 else "GOOD" if score >= 70 else "ADJUST FORM"
                     cl = "score-excellent" if score >= 85 else "score-good" if score >= 70 else "score-poor"
                     LATEST_AQA_DATA[0].update({"score": f"{score:.1f}", "feedback": fb, "class": cl, "progress": 100})
-                del X, clip
+                print(f"✅ Inference Complete! Score: {score:.1f}")
                 gc.collect()
         time.sleep(0.05)
-
+        
 @app.route('/')
 def index(): return render_template('index.html')
 
