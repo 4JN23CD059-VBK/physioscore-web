@@ -114,5 +114,13 @@ def score_feed():
     })
 
 if __name__ == '__main__':
-    threading.Thread(target=process_frames_for_aqa, daemon=True).start()
-    app.run(host='0.0.0.0', port=10000)
+    # 1. Start your AQA background thread
+    aqa_thread = threading.Thread(target=process_frames_for_aqa)
+    aqa_thread.daemon = True 
+    aqa_thread.start()
+    
+    # 2. Grab the port Render provides, or default to 10000
+    port = int(os.environ.get("PORT", 10000))
+    
+    # 3. Run the app on 0.0.0.0
+    app.run(host='0.0.0.0', port=port)
