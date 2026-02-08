@@ -14,8 +14,7 @@ from torch.nn import BatchNorm3d, Conv3d, Linear, MaxPool3d, Module, Dropout, fu
 PROJECT_ROOT = './'
 # 💥 VERIFY THIS PATH 💥
 # Ensure your model file is named exactly this or update the path
-DEMO_CHECKPOINT_PATH = os.path.join(PROJECT_ROOT, 'Deeper3DCNN_Checkpoint_L1_RECOVERY_BEST_MODEL.pth')
-
+DEMO_CHECKPOINT_PATH = os.path.join(PROJECT_ROOT, 'model_weights_lite.pth')
 # --- CONFIGURED RESOLUTION & CAMERA PATH ---
 # Using the path and resolution specified in your last request:
 VIDEO_PATH = 0 # Try 0, 1, 2, etc. if the camera doesn't open
