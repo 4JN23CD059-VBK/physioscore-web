@@ -80,6 +80,7 @@ except Exception as e:
     # We allow the app to run without the model, but score updates will fail.
     pass 
 
+"""
 # --- MiDaS Model Loading & Initialization ---
 print("Initializing MiDaS model...")
 try:
@@ -93,10 +94,19 @@ except Exception as e:
     print(f"FATAL ERROR: Failed to load MiDaS. Error: {e}")
     # We allow the app to run without MiDaS, but depth processing will fail.
     pass
+"""
 
 # -------------------------------------------------------------------------
 # --- PROCESSING AND FEEDBACK FUNCTIONS ---
 # -------------------------------------------------------------------------
+def run_midas(frame: np.ndarray) -> np.ndarray:
+    # Lean mode: Just convert to gray and resize to save RAM
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    return gray.astype(np.float32)
+
+def apply_depth_mask(depth_map: np.ndarray) -> np.ndarray:
+    return depth_map # Just pass it through
+"""
 def run_midas(frame: np.ndarray) -> np.ndarray:
     """Runs MiDaS on a single frame."""
     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -118,6 +128,7 @@ def apply_depth_mask(depth_map: np.ndarray) -> np.ndarray:
     mask = (depth_map < depth_threshold).astype(np.uint8) * 255
     masked_depth_image = cv2.bitwise_and(depth_map, depth_map, mask=mask)
     return masked_depth_image
+"""
 
 def resize_and_normalize(masked_depth_image: np.ndarray) -> np.ndarray:
     """Applies final resize and normalize (0-1 scaling)."""
