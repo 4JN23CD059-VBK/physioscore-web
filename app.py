@@ -19,7 +19,7 @@ PROJECT_ROOT = './'
 DEMO_CHECKPOINT_PATH = os.path.join(PROJECT_ROOT, 'model_weights_lite.pth')
 # --- CONFIGURED RESOLUTION & CAMERA PATH ---
 # Using the path and resolution specified in your last request:
-VIDEO_PATH = 0 # Try 0, 1, 2, etc. if the camera doesn't open
+VIDEO_PATH = 0 
 TARGET_WIDTH = 1920  
 TARGET_HEIGHT = 1080 
 # -------------------------------------------
@@ -77,24 +77,10 @@ try:
     print("✅ Deeper3DCNN model weights loaded successfully.")
 except Exception as e:
     print(f"FATAL ERROR: Could not load Deeper3DCNN model checkpoint: {e}")
-    # We allow the app to run without the model, but score updates will fail.
     pass 
 
-"""
-# --- MiDaS Model Loading & Initialization ---
-print("Initializing MiDaS model...")
-try:
-    # Attempt to load MiDaS from local cache or download
-    midas_model = torch.hub.load("intel-isl/MiDaS", "MiDaS_small", pretrained=True).to(device)
-    midas_model.eval()
-    midas_transform = torch.hub.load("intel-isl/MiDaS", "transforms")
-    transform = midas_transform.small_transform
-    print("✅ MiDaS model loaded successfully.")
-except Exception as e:
-    print(f"FATAL ERROR: Failed to load MiDaS. Error: {e}")
-    # We allow the app to run without MiDaS, but depth processing will fail.
-    pass
-"""
+# NOTE: MiDaS loading is disabled here to keep memory under 512MB for Render Free Tier.
+# If deploying on a system with >2GB RAM, you can re-enable the MiDaS block.
 
 # -------------------------------------------------------------------------
 # --- PROCESSING AND FEEDBACK FUNCTIONS ---
@@ -105,33 +91,10 @@ def run_midas(frame: np.ndarray) -> np.ndarray:
     return gray.astype(np.float32)
 
 def apply_depth_mask(depth_map: np.ndarray) -> np.ndarray:
-    return depth_map # Just pass it through
-
-""" def run_midas(frame: np.ndarray) -> np.ndarray:
-   # Runs MiDaS on a single frame.
-    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    with torch.no_grad():
-        input_batch = transform(frame_rgb).to(device)
-        prediction = midas_model(input_batch)
-        prediction = torch.nn.functional.interpolate(
-            prediction.unsqueeze(1),
-            size=frame.shape[:2],
-            mode="bicubic",
-            align_corners=False,
-        ).squeeze()
-    depth_map = prediction.cpu().numpy()
-    return np.clip(depth_map, 0.0, None)
-
-def apply_depth_mask(depth_map: np.ndarray) -> np.ndarray:
-   #  Applies a simple foreground-based depth mask.
-    depth_threshold = np.percentile(depth_map, 5) * DEPTH_MASK_MULTIPLIER
-    mask = (depth_map < depth_threshold).astype(np.uint8) * 255
-    masked_depth_image = cv2.bitwise_and(depth_map, depth_map, mask=mask)
-    return masked_depth_image """
-
+    return depth_map # Just pass it through in Lean mode
 
 def resize_and_normalize(masked_depth_image: np.ndarray) -> np.ndarray:
-    """Applies final resize and normalize (0-1 scaling)."""
+    """Applies final resize and normalization (0-1 scaling)."""
     resized = cv2.resize(masked_depth_image, TARGET_SIZE, interpolation=cv2.INTER_LINEAR)
     processed_frame = resized.astype(np.float32)
     max_val = np.max(processed_frame)
@@ -155,58 +118,53 @@ def generate_corrective_feedback(predicted_score):
 # -------------------------------------------------------------------------
 # --- THREADED AQA PROCESSING (Slow, runs in background) ---
 # -------------------------------------------------------------------------
-            """
-            if 'midas_model' not in globals() or 'model' not in globals():
-                LATEST_AQA_DATA[0].update({"feedback": "Model initialization failed. Score unavailable.", "class": "score-poor", "progress": 0})
-                time.sleep(1)
-                continue
-            try:
-                depth_map = run_midas(raw_frame)
-                masked_depth_image = apply_depth_mask(depth_map)
-                processed_frame = resize_and_normalize(masked_depth_image)
-            except Exception as e:
-                print(f"MiDaS/Depth Processing Error: {e}")
-                time.sleep(1) 
-                continue"""
-        
+
 def process_frames_for_aqa():
-    """Manages raw frame processing and 3DCNN inference (Optimized for Render)."""
+    """Manages raw frame processing and 3DCNN inference."""
     global RAW_FRAME_BUFFER, PROCESSED_FRAME_BUFFER, LATEST_AQA_DATA
     
     while not THREAD_STOP_EVENT.is_set():
+        # 1. Acquire ONE raw frame for processing
         raw_frame = None
         with RAW_BUFFER_LOCK:
             if RAW_FRAME_BUFFER:
                 raw_frame = RAW_FRAME_BUFFER.pop(0) 
 
         if raw_frame is not None:
+            # 2. RUN Pre-Processing (Optimized for Render)
             try:
-                # Optimized Path: Skip MiDaS to stay under 512MB RAM
-                gray = cv2.cvtColor(raw_frame, cv2.COLOR_BGR2GRAY)
-                processed_frame = cv2.resize(gray, TARGET_SIZE, interpolation=cv2.INTER_LINEAR)
-                processed_frame = processed_frame.astype(np.float32) / 255.0
+                # RESEARCH COMMENT: Check model availability before processing
+                if 'model' not in globals():
+                    LATEST_AQA_DATA[0].update({"feedback": "Model failed to load.", "class": "score-poor"})
+                    continue
+
+                depth_map = run_midas(raw_frame)
+                masked_depth_image = apply_depth_mask(depth_map)
+                processed_frame = resize_and_normalize(masked_depth_image)
 
                 with PROCESSED_BUFFER_LOCK:
                     PROCESSED_FRAME_BUFFER.append(processed_frame)
-                
-                # Immediate memory cleanup
-                del gray
+
+                # CLEAN RAM IMMEDIATELY after processing frame
+                del depth_map, masked_depth_image
                 gc.collect()
             except Exception as e:
                 print(f"Processing Error: {e}")
-           
+                continue
+
+        # 3. INFERENCE LOGIC
         with PROCESSED_BUFFER_LOCK:
             if len(PROCESSED_FRAME_BUFFER) >= FRAME_COUNT:
                 clip_data = np.stack(PROCESSED_FRAME_BUFFER[:FRAME_COUNT], axis=0)
+                # Sliding window: keep the last 32 frames for continuity (Ref: System B)
                 PROCESSED_FRAME_BUFFER = PROCESSED_FRAME_BUFFER[32:]
                 
-                # Inference
+                # Perform 3DCNN Inference
                 X = torch.from_numpy(clip_data).unsqueeze(0).unsqueeze(0).float().to(device)
                 with torch.no_grad():
                     predicted_output = model(X)
                     raw_score = predicted_output.item()
                     feedback_data = generate_corrective_feedback(raw_score)
-                    
                     LATEST_AQA_DATA[0].update({
                         "score": f"{raw_score:.2f}",
                         "feedback": feedback_data['text'],
@@ -214,10 +172,12 @@ def process_frames_for_aqa():
                         "progress": 100
                     })
                 
+                # FINAL RAM CLEANUP
                 del X
                 gc.collect()
 
         time.sleep(0.01)
+
 # NEW ROUTE: This is how the browser sends the webcam data to the server
 @app.route('/process_webcam', methods=['POST'])
 def process_webcam():
@@ -231,77 +191,16 @@ def process_webcam():
             RAW_FRAME_BUFFER.append(frame)
             
     return jsonify({"status": "received"})
+
+
 # -------------------------------------------------------------------------
-# --- FLASK APPLICATION & VIDEO GENERATOR (Fast Stream) ---
+# --- FLASK APPLICATION & VIDEO GENERATOR ---
 # -------------------------------------------------------------------------
 app = Flask(__name__)
-
-def video_stream_generator():
-    """Captures frames, adds them to the raw buffer, and streams QUICKLY."""
-    global RAW_FRAME_BUFFER
-
-    cap = cv2.VideoCapture(VIDEO_PATH) 
-    # Set the camera properties to the desired high resolution
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, TARGET_WIDTH)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, TARGET_HEIGHT)
-
-    if not cap.isOpened():
-        print(f"FATAL CAMERA ERROR: Could not open camera index {VIDEO_PATH}. Try changing VIDEO_PATH.")
-        return
-
-    # Start the AQA processing thread only once
-    with RAW_BUFFER_LOCK:
-        RAW_FRAME_BUFFER = []
-        if not hasattr(video_stream_generator, 'aqa_thread') or not video_stream_generator.aqa_thread.is_alive():
-            video_stream_generator.aqa_thread = threading.Thread(target=process_frames_for_aqa)
-            video_stream_generator.aqa_thread.daemon = True 
-            video_stream_generator.aqa_thread.start()
-            print("✅ AQA Processing thread started.")
-
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            print("Warning: Failed to read frame from camera.")
-            time.sleep(0.1)
-            continue
-        
-        frame = cv2.flip(frame, 1) # Flip for mirror effect
-        
-        # 1. Add raw frame (high res) to the RAW_FRAME_BUFFER (FAST)
-        with RAW_BUFFER_LOCK:
-            # Only store the newest frame, drop older ones to prevent lag
-            if len(RAW_FRAME_BUFFER) < 5: 
-                RAW_FRAME_BUFFER.append(frame.copy())
-            else:
-                RAW_FRAME_BUFFER.pop(0)
-                RAW_FRAME_BUFFER.append(frame.copy())
-            
-        # 2. Encode Frame for Web Streaming (FAST - Display is lower resolution)
-        display_frame = cv2.resize(frame, (DISPLAY_WIDTH, DISPLAY_HEIGHT))
-        
-        ret, buffer = cv2.imencode('.jpg', display_frame)
-        if not ret:
-            continue
-            
-        frame_bytes = buffer.tobytes()
-
-        # Yield frame in multipart format for streaming (FAST)
-        yield (b'--frame\r\n'
-               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-
-    cap.release()
-    THREAD_STOP_EVENT.set() # Stop the processing thread if the stream closes
-
 
 @app.route('/')
 def index():
     return render_template('index.html')
-
-@app.route('/video_feed')
-def video_feed():
-    """Route to serve the live video stream (M-JPEG)."""
-    return Response(video_stream_generator(),
-                    mimetype='multipart/x-mixed-replace; boundary=frame')
 
 @app.route('/score_feed')
 def score_feed():
@@ -315,5 +214,11 @@ def score_feed():
     })
 
 if __name__ == '__main__':
+    # Start the AQA processing thread manually
+    aqa_thread = threading.Thread(target=process_frames_for_aqa)
+    aqa_thread.daemon = True 
+    aqa_thread.start()
+    
     print("Web App running at http://127.0.0.1:5000/")
-    app.run(host='0.0.0.0', port=5000, debug=True, threaded=True)
+    # Render requires host 0.0.0.0
+    app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
