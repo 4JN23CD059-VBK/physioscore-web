@@ -12,7 +12,7 @@ from torch.nn import BatchNorm3d, Conv3d, Linear, MaxPool3d, Module, Dropout, fu
 # -------------------------------------------------------------------------
 
 PROJECT_ROOT = './'
-# 💥 VERIFY THIS PATH 💥
+#  VERIFY THIS PATH 
 # Ensure your model file is named exactly this or update the path
 DEMO_CHECKPOINT_PATH = os.path.join(PROJECT_ROOT, 'Deeper3DCNN_Checkpoint_L1_RECOVERY_BEST_MODEL.pth')
 
@@ -73,7 +73,7 @@ model = Deeper3DCNN(num_output_classes=1).to(device)
 try:
     model.load_state_dict(torch.load(DEMO_CHECKPOINT_PATH, map_location=device))
     model.eval()
-    print("✅ Deeper3DCNN model weights loaded successfully.")
+    print(" Deeper3DCNN model weights loaded successfully.")
 except Exception as e:
     print(f"FATAL ERROR: Could not load Deeper3DCNN model checkpoint: {e}")
     # We allow the app to run without the model, but score updates will fail.
@@ -87,7 +87,7 @@ try:
     midas_model.eval()
     midas_transform = torch.hub.load("intel-isl/MiDaS", "transforms")
     transform = midas_transform.small_transform
-    print("✅ MiDaS model loaded successfully.")
+    print(" MiDaS model loaded successfully.")
 except Exception as e:
     print(f"FATAL ERROR: Failed to load MiDaS. Error: {e}")
     # We allow the app to run without MiDaS, but depth processing will fail.
@@ -235,7 +235,7 @@ def video_stream_generator():
             video_stream_generator.aqa_thread = threading.Thread(target=process_frames_for_aqa)
             video_stream_generator.aqa_thread.daemon = True 
             video_stream_generator.aqa_thread.start()
-            print("✅ AQA Processing thread started.")
+            print(" AQA Processing thread started.")
 
     while True:
         ret, frame = cap.read()

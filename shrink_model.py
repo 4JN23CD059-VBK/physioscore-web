@@ -6,7 +6,7 @@ import sys
 try:
     from app import Deeper3DCNN 
 except ImportError:
-    print("❌ Error: Could not find Deeper3DCNN in app.py. Make sure app.py is in this folder!")
+    print(" Error: Could not find Deeper3DCNN in app.py. Make sure app.py is in this folder!")
     sys.exit()
 
 def shrink():
@@ -15,11 +15,11 @@ def shrink():
     output_file = 'model_weights_lite.pth'
 
     if not os.path.exists(input_file):
-        print(f"❌ Error: Could not find '{input_file}'")
+        print(f" Error: Could not find '{input_file}'")
         print(f"Current folder contents: {os.listdir('.')}")
         return
 
-    print(f"📂 Reading the big model: {input_file}...")
+    print(f" Reading the big model: {input_file}...")
     model = Deeper3DCNN()
     
     # Load the big weights
@@ -32,7 +32,7 @@ def shrink():
     else:
         model.load_state_dict(state_dict)
     
-    print("⚡ Shrinking model (Dynamic Quantization)...")
+    print(" Shrinking model (Dynamic Quantization)...")
     # This magic line reduces memory usage by converting weights to 8-bit integers
     quantized_model = torch.quantization.quantize_dynamic(
         model, 
@@ -40,12 +40,12 @@ def shrink():
         dtype=torch.qint8
     )
     
-    print(f"💾 Saving to: {output_file}...")
+    print(f" Saving to: {output_file}...")
     torch.save(quantized_model.state_dict(), output_file)
     
     old_size = os.path.getsize(input_file) / (1024*1024)
     new_size = os.path.getsize(output_file) / (1024*1024)
-    print(f"✅ Success!")
+    print(f" Success!")
     print(f"   Old size: {old_size:.2f} MB")
     print(f"   New size: {new_size:.2f} MB")
     print(f"   Reduction: {((old_size-new_size)/old_size)*100:.1f}%")

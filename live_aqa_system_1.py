@@ -9,7 +9,7 @@ from torch.nn import BatchNorm3d, Conv3d, Linear, MaxPool3d, Module, Dropout, fu
 # --- CRITICAL CONFIGURATION (MODIFIED) ---
 # -------------------------------------------------------------------------
 
-# 💥 CHANGE THIS PATH 💥
+#  CHANGE THIS PATH 
 # This should point to the directory where your model file is saved on your laptop.
 PROJECT_ROOT = './'  # Use '.' if model is in the same directory as the script
 
@@ -52,7 +52,7 @@ try:
     midas_model.eval()
     midas_transform = torch.hub.load("intel-isl/MiDaS", "transforms")
     transform = midas_transform.small_transform
-    print("✅ MiDaS model loaded successfully.")
+    print(" MiDaS model loaded successfully.")
 except Exception as e:
     print(f"FATAL ERROR: Failed to load MiDaS. Error: {e}")
     exit()
@@ -131,7 +131,7 @@ model = Deeper3DCNN(num_output_classes=1).to(device)
 try:
     model.load_state_dict(torch.load(DEMO_CHECKPOINT_PATH, map_location=device))
     model.eval()
-    print("✅ Deeper3DCNN model weights loaded successfully.")
+    print(" Deeper3DCNN model weights loaded successfully.")
 except Exception as e:
     print(f"FATAL ERROR: Could not load Deeper3DCNN model checkpoint from {DEMO_CHECKPOINT_PATH}. Error: {e}")
     print("Please check the path and file name.")
@@ -153,7 +153,7 @@ cap.set(cv2.CAP_PROP_FRAME_HEIGHT, TARGET_HEIGHT)
 print(f"Successfully opened camera index {VIDEO_PATH}.")
 print(f"Attempting to stream at {int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))}x{int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))} resolution.")
 
-print(f"🚀 Starting Live AQA Stream from Webcam...")
+print(f" Starting Live AQA Stream from Webcam...")
 print("-> Stand in front of the camera and perform the squat exercise.")
 print("-> Press 'q' to quit.")
 
@@ -188,7 +188,7 @@ while True:
     # Flip frame horizontally for mirror effect (helpful for self-correction)
     frame = cv2.flip(frame, 1)
     
-    # 💥 THE DEPTH-AWARE PIPELINE 💥
+    #  THE DEPTH-AWARE PIPELINE 
     depth_map = run_midas(frame)
     masked_depth_image = apply_depth_mask(depth_map)
     processed_frame = resize_and_normalize(masked_depth_image) 
